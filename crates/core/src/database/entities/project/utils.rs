@@ -4,7 +4,9 @@ use sqlx::{PgPool, prelude::FromRow};
 use tracing::debug;
 use uuid::Uuid;
 
-use super::ProjectDBType;
+use crate::database::{entities::project::DBProjectColumn, tools::TableQuery};
+
+use super::{DBProject, ProjectDBType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow)]
 pub struct ProjectLookupResult {
@@ -12,13 +14,25 @@ pub struct ProjectLookupResult {
     pub scope: Option<String>,
     pub project_key: String,
     pub name: String,
-    pub storage_path: String,
+    pub project_path: String,
 }
-impl ProjectDBType for ProjectLookupResult {
-    fn columns() -> Vec<&'static str> {
-        vec!["id", "scope", "project_key", "name", "storage_path"]
+impl TableQuery for ProjectLookupResult {
+    type Table = DBProject;
+
+    fn columns() -> Vec<<Self::Table as crate::database::prelude::TableType>::Columns>
+    where
+        Self: Sized,
+    {
+        vec![
+            DBProjectColumn::Id,
+            DBProjectColumn::Scope,
+            DBProjectColumn::ProjectKey,
+            DBProjectColumn::Name,
+            DBProjectColumn::ProjectPath,
+        ]
     }
 }
+impl ProjectDBType for ProjectLookupResult {}
 #[derive(Debug, Clone, PartialEq, Eq, Builder)]
 pub struct ProjectLookup {
     pub project_key: Option<ProjectkeyLookup>,
@@ -88,6 +102,7 @@ impl ProjectLookup {
         let projects = projects.fetch_all(database).await?;
         Ok(projects)
     }
+
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

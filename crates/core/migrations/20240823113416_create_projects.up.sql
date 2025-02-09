@@ -1,24 +1,29 @@
--- Add up migration script here
--- Add up migration script here
 create  TABLE IF NOT EXISTS  projects
 (
-    id                 UUID                     default gen_random_uuid() not null
-        constraint projects_pk
-            primary key,
+    id                 UUID                     default gen_random_uuid() PRIMARY KEY,
     scope              TEXT,
-    project_key        TEXT                                               not null,
+    key                TEXT COLLATE ignoreCase                               not null,
     name               TEXT,
-    latest_release     TEXT,
-    latest_pre_release TEXT,
     description        TEXT,
-    tags               TEXT[]                   default array []::text[]  not null,
     repository_id         UUID                                               not null
         constraint fk_repositories
             references repositories
             on delete cascade,
-    storage_path       TEXT                                               not null,
+    CONSTRAINT unique_repository_project_key unique (project_key, repository_id),
+    project_path       TEXT                                               not null,
+    CONSTRAINT unique_repository_project_path  unique (project_path, repository_id),
     updated_at         TIMESTAMP WITH TIME ZONE default CURRENT_TIMESTAMP not null,
     created_at         TIMESTAMP WITH TIME ZONE default CURRENT_TIMESTAMP not null
+);
+
+CREATE TABLE IF NOT EXISTS project_tags (
+    id                 serial  PRIMARY KEY,
+    project_id         UUID                                               not null
+        constraint fk_project
+            references projects
+            on delete cascade,
+    tag                TEXT                                               not null,
+    CONSTRAINT unique_project_tag unique (project_id, tag)
 );
 create TABLE IF NOT EXISTS  project_members
 (
@@ -40,15 +45,15 @@ create TABLE IF NOT EXISTS  project_members
 
 create TABLE IF NOT EXISTS  project_versions
 (
-    id           serial
-        constraint project_versions_pk
-            primary key,
+    id           serial PRIMARY KEY,
     project_id   uuid
         constraint project_versions_projects_id_fk
             references projects
             on delete cascade,
-    version      TEXT                                               not null,
-    release_type TEXT                     default 'Unknown'         not null,
+    version      VARCHAR(255)                                               not null,
+    CONSTRAINT unique_project_version unique (project_id, version),
+
+    release_type VARCHAR(255)                     default 'Unknown'         not null,
     version_path TEXT                                               not null,
     publisher    integer
         constraint project_versions_users_id_fk
@@ -59,4 +64,3 @@ create TABLE IF NOT EXISTS  project_versions
     updated_at   TIMESTAMP WITH TIME ZONE default CURRENT_TIMESTAMP not null,
     created_at   TIMESTAMP WITH TIME ZONE default CURRENT_TIMESTAMP not null
 );
-

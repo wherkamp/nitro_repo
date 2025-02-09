@@ -101,7 +101,7 @@ pub trait MavenRepositoryExt: Repository + Debug {
         let db_project =
             DBProject::find_by_project_key(&project_key, self.id(), &self.site().database).await?;
         let (project_id, project_dir) = if let Some(project) = db_project {
-            (project.id, StoragePath::from(project.storage_path))
+            (project.id, StoragePath::from(project.project_path))
         } else {
             let project_directory = version_directory.clone().parent();
             trace!(?project_directory, "Creating Project");

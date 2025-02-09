@@ -8,6 +8,8 @@ use super::RepositoryConfigType;
 pub struct ProjectConfig {
     #[schemars(title = "Badge Settings")]
     pub badge_settings: BadgeSettings,
+    /// Whether to require a semver version for releases
+    pub require_semver: bool,
 }
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProjectConfigType;

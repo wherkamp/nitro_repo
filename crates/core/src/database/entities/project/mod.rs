@@ -4,30 +4,18 @@ use sqlx::{FromRow, PgPool, postgres::PgRow};
 use tracing::instrument;
 use utoipa::ToSchema;
 use uuid::Uuid;
+use versions::{DBProjectVersion, DBProjectVersionColumn};
 mod new;
 pub mod utils;
-use crate::database::prelude::*;
+use crate::{database::prelude::*, repository::project::ReleaseType};
 pub use new::*;
 pub mod info;
 pub mod update;
 pub mod versions;
 /// Implemented on different types of Project query result. Such as ProjectLookupResult
-pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync {
-    /// What columns to select from the database
-    fn columns() -> Vec<&'static str>;
-    fn format_columns(prefix: Option<&str>) -> String {
-        if let Some(prefix) = prefix {
-            Self::columns()
-                .iter()
-                .map(|column| format!("{}.{}", prefix, column))
-                .collect::<Vec<String>>()
-                .join(", ")
-        } else {
-            Self::columns().join(", ")
-        }
-    }
+pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync + TableQuery {
     async fn find_by_id(id: Uuid, database: &PgPool) -> Result<Option<Self>, sqlx::Error> {
-        let columns = Self::format_columns(None);
+        let columns = concat_columns(&Self::columns(), None);
         let project =
             sqlx::query_as::<_, Self>(&format!("SELECT {} FROM projects WHERE id = $1", columns))
                 .bind(id)
@@ -40,7 +28,7 @@ pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync {
         repository: Uuid,
         database: &PgPool,
     ) -> Result<Option<Self>, sqlx::Error> {
-        let columns = Self::format_columns(None);
+        let columns = concat_columns(&Self::columns(), None);
         let project = sqlx::query_as::<_, Self>(&format!(
             "SELECT {} FROM projects WHERE repository_id = $1 AND LOWER(project_key) = $2",
             columns
@@ -57,8 +45,8 @@ pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync {
         repository: Uuid,
         database: &PgPool,
     ) -> Result<Option<Self>, sqlx::Error> {
-        let columns = Self::format_columns(None);
-        let project = sqlx::query_as::<_, Self>(&format!(
+        let columns = concat_columns(&Self::columns(), None);
+        let project: Option<Self> = sqlx::query_as::<_, Self>(&format!(
             "SELECT {} FROM projects WHERE repository_id = $1 AND LOWER(storage_path) = $2",
             columns
         ))
@@ -70,7 +58,7 @@ pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync {
     }
     #[instrument(skip(database))]
     async fn get_by_id(id: Uuid, database: &PgPool) -> Result<Option<Self>, sqlx::Error> {
-        let columns = Self::format_columns(None);
+        let columns = concat_columns(&Self::columns(), None);
 
         let project =
             sqlx::query_as::<_, Self>(&format!("SELECT {} FROM projects WHERE id = $1", columns))
@@ -85,7 +73,7 @@ pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync {
         repository: Uuid,
         database: &PgPool,
     ) -> Result<Option<Self>, sqlx::Error> {
-        let columns = Self::format_columns(Some("P"));
+        let columns = concat_columns(&Self::columns(), Some("P"));
         let project = sqlx::query_as::<_, Self>(
             &format!(
                 "SELECT {} FROM projects as P FULL JOIN project_versions as V ON LOWER(V.release_path) = $1 AND V.project_id = P.id WHERE P.repository_id = $2",
@@ -108,6 +96,8 @@ pub struct DBProject {
     pub scope: Option<String>,
     /// Maven will use something like `{groupId}:{artifactId}`
     /// Cargo will use the `name` field
+    ///
+    /// This field is unique per repository
     pub project_key: String,
     /// Name of the project
     ///
@@ -115,19 +105,12 @@ pub struct DBProject {
     /// Cargo will use the `name` field
     /// NPM will use the `name` field
     pub name: String,
-    /// Latest stable release
-    pub latest_release: Option<String>,
-    /// Release is SNAPSHOT in Maven or Alpha, Beta, on any other repository type
-    /// This is the latest release or pre-release
-    pub latest_pre_release: Option<String>,
     /// A short description of the project
     pub description: Option<String>,
-    /// Can be empty
-    pub tags: Vec<String>,
     /// The repository it belongs to
     pub repository_id: Uuid,
-    /// Storage Path
-    pub storage_path: String,
+    /// The path to the project in the repository
+    pub project_path: String,
     /// Last time the project was updated. This is updated when a new version is added
     pub updated_at: chrono::DateTime<chrono::FixedOffset>,
     /// When the project was created
@@ -143,11 +126,7 @@ impl TableType for DBProject {
         "projects"
     }
 }
-impl ProjectDBType for DBProject {
-    fn columns() -> Vec<&'static str> {
-        vec!["*"]
-    }
-}
+impl ProjectDBType for DBProject {}
 /// On the first push. The pusher will be added as a project member with write and manage permissions
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow, ToSchema)]
 pub struct DBProjectMember {
@@ -164,4 +143,23 @@ impl DBProjectMember {}
 pub struct ProjectIds {
     pub project_id: Uuid,
     pub version_id: i32,
+}
+
+pub async fn latest_version(
+    project_id: Uuid,
+    release_type: ReleaseType,
+    database: &PgPool,
+) -> Result<Option<i32>, sqlx::Error> {
+    let version_id: Option<i32> = SimpleSelectQueryBuilder::new(
+        DBProjectVersion::table_name(),
+        vec![DBProjectVersionColumn::Id],
+    )
+    .where_equals(DBProjectVersionColumn::ProjectId, project_id)
+    .where_equals(DBProjectVersionColumn::ReleaseType, release_type)
+    .order_by(DBProjectVersionColumn::CreatedAt, SQLOrder::Descending)
+    .limit(1)
+    .query_scalar()
+    .fetch_optional(database)
+    .await?;
+    Ok(version_id)
 }
